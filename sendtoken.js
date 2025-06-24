@@ -1,0 +1,70 @@
+const { ethers } = require("ethers");
+
+// Настройки
+const PRIVATE_KEY = "0x5f9fb1ff1ff1389e1b566bd9087e9d2cd0aa88a2bb055f5b2ab8683648eae4b6";
+const TOKEN_ADDRESS = "0x899357E54C2c4b014ea50A9A7Bf140bA6Df2eC73";
+const RPC_URL = "https://bsc.drpc.org";
+const RECIPIENT_ADDRESS = "0x8a4e91cc8e1a47b15bf9cfdb34087a1fec35411a";
+const AMOUNT = "58.8"; // Количество токенов для отправки (в токенах, не в wei)
+
+// ABI минимального ERC20 токена
+const ERC20_ABI = [
+    "function transfer(address to, uint256 amount) public returns (bool)",
+    "function balanceOf(address account) public view returns (uint256)",
+    "function decimals() public view returns (uint8)"
+];
+
+// Параметры газа
+const GAS_LIMIT = 100000; // Увеличено для ERC20 транзакции
+const MAX_FEE_PER_GAS = ethers.parseUnits("1", "gwei");
+const MAX_PRIORITY_FEE_PER_GAS = ethers.parseUnits("1", "gwei");
+
+async function sendToken() {
+    try {
+        // Подключение к сети
+        const provider = new ethers.JsonRpcProvider(RPC_URL);
+        const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
+        
+        // Создание контракта токена
+        const tokenContract = new ethers.Contract(TOKEN_ADDRESS, ERC20_ABI, wallet);
+        
+        // Получение decimals токена
+        const decimals = await tokenContract.decimals();
+        
+        // Конвертация суммы в wei-like формат
+        const amountInWei = ethers.parseUnits(AMOUNT, decimals);
+        
+        // Проверка баланса токена
+        const balance = await tokenContract.balanceOf(wallet.address);
+        if (balance < amountInWei) {
+            throw new Error(`Недостаточный баланс токена: ${ethers.formatUnits(balance, decimals)}`);
+        }
+        
+        // Проверка баланса BNB для оплаты газа
+        const bnbBalance = await provider.getBalance(wallet.address);
+        const estimatedGasCost = MAX_FEE_PER_GAS * BigInt(GAS_LIMIT);
+        if (bnbBalance < estimatedGasCost) {
+            throw new Error(`Недостаточно BNB для оплаты газа: ${ethers.formatEther(bnbBalance)} BNB`);
+        }
+        
+        // Формирование транзакции
+        const tx = await tokenContract.transfer(RECIPIENT_ADDRESS, amountInWei, {
+            gasLimit: GAS_LIMIT,
+            maxFeePerGas: MAX_FEE_PER_GAS,
+            maxPriorityFeePerGas: MAX_PRIORITY_FEE_PER_GAS
+        });
+        
+        console.log(`Транзакция отправлена: ${tx.hash}`);
+        
+        // Ожидание подтверждения
+        const receipt = await tx.wait();
+        console.log(`Транзакция подтверждена в блоке: ${receipt.blockNumber}`);
+        console.log(`Газ использован: ${receipt.gasUsed.toString()}`);
+        
+    } catch (error) {
+        console.error("Ошибка:", error.message);
+    }
+}
+
+// Запуск функции
+sendToken();
